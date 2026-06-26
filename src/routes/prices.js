@@ -13,15 +13,18 @@ router.get('/', async (_req, res) => {
   }
 });
 
-// GET /api/v1/prices/history?model=<openrouter-id|key>&days=120
-// Real daily OHLC built from accumulated snapshots.
+// GET /api/v1/prices/history?model=<openrouter-id|key>&days=120&bucket=day|hour
+// Real OHLC built from accumulated snapshots.
 router.get('/history', async (req, res) => {
   try {
     let model = String(req.query.model || '');
     if (!model) return res.status(400).json({ ok: false, error: 'model_required' });
-    // accept either a ticker key (e.g. "GPT") or a full slug
-    const byKey = TRACKED.find((t) => t.key.toLowerCase() === model.toLowerCase());
-    if (byKey) model = byKey.id;
+    // accept a ticker key (e.g. "GPT") -> resolve to the live id snapshots are stored under
+    if (TRACKED.some((t) => t.key.toLowerCase() === model.toLowerCase())) {
+      const live = await livePrices();
+      const hit = live.find((p) => p.key.toLowerCase() === model.toLowerCase());
+      if (hit) model = hit.id;
+    }
     const days = Math.min(365, Math.max(1, parseInt(req.query.days || '120', 10)));
     const bucket = String(req.query.bucket || 'day') === 'hour' ? 3600 : 86400;
     const bars = await priceHistory(model, days, bucket);

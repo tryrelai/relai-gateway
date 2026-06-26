@@ -10,8 +10,8 @@ export const MODELS = {
   'qwen/qwen-2.5-72b-instruct': { tier: 'futures', rate: 0.16, label: 'Qwen Forward' },
   'mistralai/mistral-large': { tier: 'futures', rate: 0.22, label: 'Mistral Forward' },
   'openai/gpt-4o': { tier: 'capacity', rate: 3.50, label: 'GPT Capacity' },
-  'google/gemini-pro-1.5': { tier: 'capacity', rate: 2.50, label: 'Gemini Capacity' },
-  'anthropic/claude-3.5-sonnet': { tier: 'capacity', rate: 1.80, label: 'Claude Capacity' },
+  'google/gemini-2.5-pro': { tier: 'capacity', rate: 2.50, label: 'Gemini Capacity' },
+  'anthropic/claude-sonnet-4.6': { tier: 'capacity', rate: 1.80, label: 'Claude Capacity' },
 };
 
 export function getModel(id) {

@@ -9,15 +9,17 @@
 // market exists, at which point mark comes from the chain instead.
 import { db } from '../supabase.js';
 
-// The 7 model families Relai routes, mapped to their OpenRouter slug + ticker key.
+// The 7 model families Relai routes. Each has a list of candidate OpenRouter
+// slugs (newest first) and a `match` regex used as a self-healing fallback if
+// every explicit slug 404s after a provider rename.
 export const TRACKED = [
-  { key: 'DeepSeek', id: 'deepseek/deepseek-chat',                 prov: 'DeepSeek' },
-  { key: 'Llama',    id: 'meta-llama/llama-3.3-70b-instruct',      prov: 'Meta' },
-  { key: 'Qwen',     id: 'qwen/qwen-2.5-72b-instruct',             prov: 'Qwen' },
-  { key: 'Mistral',  id: 'mistralai/mistral-large',               prov: 'Mistral' },
-  { key: 'GPT',      id: 'openai/gpt-4o',                          prov: 'OpenAI' },
-  { key: 'Gemini',   id: 'google/gemini-pro-1.5',                 prov: 'Google' },
-  { key: 'Claude',   id: 'anthropic/claude-3.5-sonnet',           prov: 'Anthropic' },
+  { key: 'DeepSeek', prov: 'DeepSeek', ids: ['deepseek/deepseek-chat-v3', 'deepseek/deepseek-chat'], match: /^deepseek\/deepseek-chat/ },
+  { key: 'Llama',    prov: 'Meta',     ids: ['meta-llama/llama-3.3-70b-instruct'], match: /^meta-llama\/llama-3\.3-70b/ },
+  { key: 'Qwen',     prov: 'Qwen',     ids: ['qwen/qwen-2.5-72b-instruct'], match: /^qwen\/qwen-?2\.5-72b/ },
+  { key: 'Mistral',  prov: 'Mistral',  ids: ['mistralai/mistral-large'], match: /^mistralai\/mistral-large/ },
+  { key: 'GPT',      prov: 'OpenAI',   ids: ['openai/gpt-4o'], match: /^openai\/gpt-4o(?!-mini)/ },
+  { key: 'Gemini',   prov: 'Google',   ids: ['google/gemini-2.5-pro', 'google/gemini-pro-1.5'], match: /^google\/gemini-(2\.5-pro|pro-1\.5|pro)\b/ },
+  { key: 'Claude',   prov: 'Anthropic', ids: ['anthropic/claude-sonnet-4.6', 'anthropic/claude-sonnet-4.5', 'anthropic/claude-3.5-sonnet'], match: /^anthropic\/claude-(sonnet-4|3\.5-sonnet)/ },
 ];
 
 const OR_MODELS = 'https://openrouter.ai/api/v1/models';
@@ -40,16 +42,27 @@ export async function livePrices() {
   const r = await fetch(OR_MODELS, { headers: { accept: 'application/json' } });
   if (!r.ok) throw new Error('openrouter_models_' + r.status);
   const j = await r.json();
-  const byId = new Map((j.data || []).map((m) => [m.id, m]));
+  const list = j.data || [];
+  const byId = new Map(list.map((m) => [m.id, m]));
+
+  const priced = (m) => m && m.pricing && (Number(m.pricing.prompt) > 0 || Number(m.pricing.completion) > 0);
 
   const out = TRACKED.map((t) => {
-    const m = byId.get(t.id);
+    // 1) try explicit candidate slugs in order
+    let m = null;
+    for (const id of t.ids) { const c = byId.get(id); if (priced(c)) { m = c; break; } }
+    // 2) self-healing fallback: pick a listed model matching the family regex
+    if (!m) {
+      const cands = list.filter((x) => t.match.test(x.id) && priced(x))
+        .sort((a, b) => a.id.length - b.id.length); // prefer the most "base" slug
+      m = cands[0] || null;
+    }
     const inp = m ? mtok(m.pricing?.prompt) : null;
     const outp = m ? mtok(m.pricing?.completion) : null;
     const spot = inp != null && outp != null ? +(((inp + outp) / 2)).toFixed(4) : null;
     return {
       key: t.key,
-      id: t.id,
+      id: m ? m.id : t.ids[0],
       prov: t.prov,
       in: inp,
       out: outp,
