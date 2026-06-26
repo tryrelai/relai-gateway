@@ -2,22 +2,28 @@ import { Router } from 'express';
 import crypto from 'node:crypto';
 import { db } from '../supabase.js';
 import { config } from '../config.js';
-import { requireJwt } from '../middleware/auth.js';
+import { optionalJwt } from '../middleware/auth.js';
 import { getModel } from '../lib/pricing.js';
 import { chainReady } from '../lib/chain.js';
+import { isValidWallet } from '../lib/solana.js';
 import { settleIntent } from '../lib/settle.js';
 import { assetUsd, payAssetMeta, SOL_MINT } from '../lib/assets.js';
 
 const router = Router();
-router.use(requireJwt);
+router.use(optionalJwt); // wallet comes from JWT if logged in, else from the request body
 
 const PRESETS_M = [1, 5, 10, 25, 50, 100];
 const ASSETS = ['usdc', 'sol', 'relai'];
 
-// POST /api/v1/topup/intent  { model_id, tokens_m, pay_with }
+// POST /api/v1/topup/intent  { model_id, tokens_m, pay_with, wallet? }
 // Creates a pending order priced in the chosen asset and returns pay instructions.
+// Credit always settles to the wallet that actually pays on-chain, so accepting a
+// wallet in the body (when not logged in) is safe.
 router.post('/intent', async (req, res) => {
   if (!chainReady()) return res.status(503).json({ error: 'topups_not_configured' });
+
+  const wallet = req.wallet || (req.body?.wallet || '').toString();
+  if (!isValidWallet(wallet)) return res.status(400).json({ error: 'wallet_required' });
 
   const modelId = (req.body?.model_id || '').toString();
   const tokensM = Number(req.body?.tokens_m);
@@ -47,7 +53,7 @@ router.post('/intent', async (req, res) => {
   const { data, error } = await db
     .from('topup_intents')
     .insert({
-      wallet: req.wallet,
+      wallet: wallet,
       reference,
       model_id: modelId,
       tokens_m: tokensM,
@@ -86,12 +92,9 @@ router.post('/verify', async (req, res) => {
   if (!chainReady()) return res.status(503).json({ error: 'topups_not_configured' });
 
   const intentId = (req.body?.intent_id || '').toString();
-  const { data: intent } = await db
-    .from('topup_intents')
-    .select('*')
-    .eq('id', intentId)
-    .eq('wallet', req.wallet)
-    .maybeSingle();
+  const q = db.from('topup_intents').select('*').eq('id', intentId);
+  if (req.wallet) q.eq('wallet', req.wallet); // if logged in, scope to own intents
+  const { data: intent } = await q.maybeSingle();
   if (!intent) return res.status(404).json({ error: 'intent_not_found' });
 
   const r = await settleIntent(intent);

@@ -18,3 +18,13 @@ export function requireJwt(req, res, next) {
     return res.status(401).json({ error: 'invalid_token' });
   }
 }
+
+/** Attaches req.wallet if a valid Bearer JWT is present; never blocks. */
+export function optionalJwt(req, _res, next) {
+  const h = req.headers.authorization || '';
+  const token = h.startsWith('Bearer ') ? h.slice(7) : null;
+  if (token) {
+    try { req.wallet = jwt.verify(token, config.jwtSecret).wallet; } catch { /* ignore */ }
+  }
+  next();
+}
