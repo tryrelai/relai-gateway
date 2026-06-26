@@ -1,82 +1,109 @@
-# Relai Gateway
+<div align="center">
 
-Locked-rate inference relay on Solana. OpenAI-compatible gateway with prepaid compute credits.
-Express + Supabase + Solana wallet-auth, proxying to OpenRouter with per-token metering.
+<img src="https://tryrelai.xyz/assets/logo-mark.png" alt="Relai" width="84" />
 
-## What it does
+# Relai
 
-1. **Wallet auth** — `nonce → sign (Phantom) → JWT`. No passwords.
-2. **API keys** — `relai_sk_...`, sha256-hashed at rest, tied to a wallet.
-3. **Gateway** — OpenAI-compatible `/v1/chat/completions`. Point any OpenAI SDK at it.
-4. **Metering** — every request deducts `tokens × locked_rate` from a prepaid USDC-denominated balance. Balance ≤ 0 → `402`.
+**The rate desk for AI inference.**
+Lock today's per-token price in USDC, then route any model through one OpenAI-compatible gateway — settled on Solana.
 
-## Routes
+[![Website](https://img.shields.io/badge/site-tryrelai.xyz-0A0A0A?style=flat-square)](https://tryrelai.xyz)
+[![Docs](https://img.shields.io/badge/docs-read-0A0A0A?style=flat-square)](https://docs.tryrelai.xyz)
+[![Trade](https://img.shields.io/badge/futures-terminal-11A66B?style=flat-square)](https://trade.tryrelai.xyz)
+[![X](https://img.shields.io/badge/X-@tryrelai-0A0A0A?style=flat-square&logo=x)](https://x.com/tryrelai)
+[![License](https://img.shields.io/badge/license-MIT-555?style=flat-square)](LICENSE)
 
-| Method | Path | Auth | Notes |
-|---|---|---|---|
-| GET | `/health` | — | liveness |
-| GET | `/api/v1/config` | — | mint, treasury, model catalogue |
-| GET | `/api/v1/auth/nonce/:wallet` | — | sign-in message |
-| POST | `/api/v1/auth/login` | — | `{wallet, signature}` → JWT |
-| GET | `/api/v1/dashboard/` | JWT | balance, keys, usage |
-| POST | `/api/v1/dashboard/api-keys` | JWT | `{label}` → plaintext key (once) |
-| POST | `/api/v1/dashboard/api-keys/:id/revoke` | JWT | |
-| POST | `/api/v1/topup/intent` | JWT | `{model_id, tokens_m}` → payment instructions |
-| POST | `/api/v1/topup/verify` | JWT | `{intent_id}` → checks chain, credits once |
-| GET | `/api/v1/stats` | — | Public aggregate stats (treasury, totals, models, tiers) |
-| GET | `/api/v1/gateway/v1/models` | API key | catalogue |
-| POST | `/api/v1/gateway/v1/chat/completions` | API key | metered, stream + non-stream |
+![Node](https://img.shields.io/badge/Node-22.x-339933?style=flat-square&logo=nodedotjs&logoColor=white)
+![Solana](https://img.shields.io/badge/Solana-USDC-9945FF?style=flat-square&logo=solana&logoColor=white)
+![Supabase](https://img.shields.io/badge/Supabase-Postgres-3FCF8E?style=flat-square&logo=supabase&logoColor=white)
+![Vercel](https://img.shields.io/badge/Vercel-frontend-000?style=flat-square&logo=vercel&logoColor=white)
+![Railway](https://img.shields.io/badge/Railway-gateway-0B0D0E?style=flat-square&logo=railway&logoColor=white)
 
-## Top-ups (USDC → balance)
+</div>
 
-1. Frontend calls `POST /topup/intent` with model + token amount. Backend computes USDC owed (`tokens_M × locked_rate`), stores a pending `topup_intents` row, and returns the treasury address + a Solana Pay URL.
-2. User sends USDC from their connected wallet to the treasury.
-3. Frontend polls `POST /topup/verify`. Backend scans recent USDC transfers into the treasury's USDC ATA from that wallet, validates amount, credits via `credit_balance()`, and records the tx in `topups` (unique `tx_sig` blocks double-credit).
+---
 
-USDC has 6 decimals, so its base units equal micro-USD — the transferred amount is the credited balance 1:1. Requires `RPC_URL`, `TREASURY_WALLET`, and `USDC_MINT` set. Run `sql/02_topup.sql` after `schema.sql`.
+## ⚡ What is Relai?
 
-## Setup
+Spot inference prices move against you. Relai lets you **prepay compute at a fixed rate** and spend it whenever you want.
 
-1. Create a Supabase project. Run `sql/schema.sql` then `sql/02_topup.sql`.
-2. Get an OpenRouter API key. Fund/identify a treasury wallet for USDC.
-3. `cp .env.example .env` and fill values. Generate a JWT secret: `openssl rand -hex 48`.
-4. `npm install && npm start`
+- 🔒 **Lock the rate** — buy a prepaid balance at a fixed `$/M-token` price.
+- 💵 **Pay in USDC** — top-ups settle on-chain to the treasury and credit your balance.
+- 🔁 **Route anything** — one OpenAI-compatible endpoint fronts seven model families.
+- 🪪 **Own your access** — auth is a wallet signature. No card, no KYC, no key that vanishes.
+- 🤖 **Built for agents** — programmatic keys, metered per token, drop-in for any OpenAI SDK.
 
-## Not built yet (next slices)
+> Relai is prepaid, locked-rate access to LLM inference, paid in USDC and metered per token. It is infrastructure, not a financial product.
 
-- **Solana Pay reference matching** — verify/sweeper match by sender wallet (robust for manual sends); reference-key matching can be added for stricter order binding.
-- **Stats at scale** — `/stats` sums rows in JS; swap to a SQL aggregate or cached counter as volume grows.
-- **Token / staking / treasury** — $RELAI mint, Streamflow staking, buyback-burn.
-
-## Background sweeper
-
-A loop auto-settles pending top-ups so a payment credits even if the user closes the tab. It scans pending `topup_intents`, matches on-chain payments, credits via `settleIntent`, and expires intents older than 24h. Controlled by `SWEEPER` (`on`/`off`), `SWEEPER_INTERVAL_MS`, `SWEEPER_BATCH`. Requires `RPC_URL` + `TREASURY_WALLET`.
-
-## Deploy (Railway)
+## 🧭 Architecture
 
 ```
-git init && git add . && git commit -m "relai gateway"
-git push        # → Railway auto-rebuilds
+Wallet ──▶ Futures UI ──▶ Gateway ──▶ OpenRouter ──▶ Models
+(Solana)    (Vercel)      (Railway)                 (DeepSeek · Llama · …)
+                │
+                ▼
+          Supabase ledger  ◀──  USDC top-ups (Solana)
 ```
 
-Railway env vars to set: `JWT_SECRET`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`,
-`OPENROUTER_API_KEY`, `CORS_ORIGINS`, `RPC_URL`, `TREASURY_WALLET`, `TOKEN_MINT` (when live).
+| Layer        | Stack                                   |
+| ------------ | --------------------------------------- |
+| Marketing    | Static site on **Vercel** — `tryrelai.xyz` |
+| Futures terminal | TradingView Lightweight Charts — `trade.tryrelai.xyz` |
+| Gateway      | Node 22 / Express on **Railway** — `api.tryrelai.xyz` |
+| Database     | **Supabase** (Postgres) ledger + balances |
+| Settlement   | **USDC on Solana** to the treasury wallet |
+| Routing      | **OpenRouter** upstream                 |
 
-## Test the gateway
+## 🚀 Quickstart
+
+Swap the base URL into any OpenAI-compatible client:
 
 ```bash
-curl https://YOUR_API/api/v1/gateway/v1/chat/completions \
+curl https://api.tryrelai.xyz/api/v1/gateway/v1/chat/completions \
   -H "Authorization: Bearer relai_sk_..." \
   -H "Content-Type: application/json" \
-  -d '{"model":"deepseek/deepseek-chat","messages":[{"role":"user","content":"hi"}]}'
+  -d '{"model":"deepseek/deepseek-chat","messages":[{"role":"user","content":"hello"}]}'
 ```
 
-## Honesty notes
+```python
+from openai import OpenAI
+client = OpenAI(base_url="https://api.tryrelai.xyz/api/v1/gateway/v1", api_key="relai_sk_...")
+r = client.chat.completions.create(
+    model="deepseek/deepseek-chat",
+    messages=[{"role": "user", "content": "hello"}],
+)
+print(r.choices[0].message.content)
+```
 
-- Top-ups settle on-chain in USDC; usage metering and balances live in Postgres. Describe it as "USDC top-ups, metered off-chain" — accurate, not "fully on-chain settlement".
-- These are prepaid locked-rate credits, not financial derivatives. Avoid "futures/derivatives" framing in public copy unless real contracts exist.
-- If $RELAI claims buyback-burn, the burn must actually execute on-chain and be verifiable.
+Full reference at **[docs.tryrelai.xyz](https://docs.tryrelai.xyz)**.
 
-## Holder tiers (live)
+## 📦 Repositories
 
-If `TOKEN_MINT` is set, the gateway reads each caller's on-chain $RELAI balance and discounts the locked rate (Base 0% / Bronze 5% / Silver 10% / Gold 20%). Responses carry `X-Relai-Tier` and `X-Relai-Discount` headers; the dashboard shows the holder's tier. Thresholds live in `src/lib/tiers.js`. Balances are cached 5 min. Fully verifiable — the discount derives from real holdings.
+| Repo            | What it is                                              |
+| --------------- | ------------------------------------------------------- |
+| `relai-gateway` | OpenAI-compatible metered gateway (Express + Supabase)  |
+| `relai-site`    | Marketing site, futures terminal, account dashboard     |
+| `relai-docs`    | Documentation                                           |
+| `relai-token`   | `$RELAI` SPL tooling — mint, holder tiers, buyback-burn  |
+
+## 🗺️ Roadmap
+
+- [x] OpenAI-compatible gateway, metered per token
+- [x] Wallet-signature auth + prepaid USDC balances
+- [x] Seven routable model families
+- [x] Futures terminal (chart, order book, positions)
+- [x] `$RELAI` holder tiers — discounted rates by holdings
+- [ ] `$RELAI` token launch
+- [ ] On-chain settlement of futures positions
+- [ ] More lockable models as tiers expand
+
+## 🔗 Links
+
+- **Site** — https://tryrelai.xyz
+- **Futures** — https://trade.tryrelai.xyz
+- **Docs** — https://docs.tryrelai.xyz
+- **X** — https://x.com/tryrelai
+
+## 📄 License
+
+MIT © Relai
