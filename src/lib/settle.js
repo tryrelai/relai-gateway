@@ -71,6 +71,9 @@ export async function settleIntent(intent) {
     });
     if (dupErr) continue; // already credited by another intent
 
+    // make sure the wallet exists in users (connect-only buyers never logged in)
+    await db.from('users').upsert({ wallet: intent.wallet }, { onConflict: 'wallet', ignoreDuplicates: true });
+
     const { data: newBal } = await db.rpc('credit_balance', { p_wallet: intent.wallet, p_micros: p.micros });
     await db.from('topup_intents').update({ status: 'paid', tx_sig: p.signature }).eq('id', intent.id);
 
