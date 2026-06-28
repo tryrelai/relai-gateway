@@ -10,6 +10,7 @@ import topupRoutes from './routes/topup.js';
 import statsRoutes from './routes/stats.js';
 import pricesRoutes from './routes/prices.js';
 import curveRoutes from './routes/curve.js';
+import balanceRoutes from './routes/balance.js';
 import { startSweeper } from './lib/sweeper.js';
 import { snapshotPrices } from './lib/prices.js';
 
@@ -32,6 +33,7 @@ app.use('/api/v1/topup', topupRoutes);
 app.use('/api/v1/stats', statsRoutes);
 app.use('/api/v1/prices', cors(), pricesRoutes);
 app.use('/api/v1/curve', cors(), curveRoutes);
+app.use('/api/v1/balance', cors(), balanceRoutes);
 
 app.use((req, res) => res.status(404).json({ error: 'not_found', path: req.path }));
 
