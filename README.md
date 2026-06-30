@@ -1,4 +1,4 @@
-https://pbs.twimg.com/profile_images/2069174657950121984/mVKJRYuM_400x400.jpg
+
 <p align="center">
   <img src="assets/banner.png" alt="Relai Gateway" width="100%" />
 </p>
